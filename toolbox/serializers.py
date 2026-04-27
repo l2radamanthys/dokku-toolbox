@@ -4,7 +4,17 @@ DRF Serializers for Dokku Toolbox.
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
-from .models import App, Command, ExecutionLog, Server
+from .models import App, Command, ExecutionLog, Server, SSHKey
+
+
+class SSHKeySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SSHKey
+        fields = ['id', 'name', 'key_content', 'key_path', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'key_content': {'write_only': True}  # Hide key content in lists/details for safety
+        }
 
 
 class ServerSerializer(serializers.ModelSerializer):
@@ -12,7 +22,7 @@ class ServerSerializer(serializers.ModelSerializer):
         model = Server
         fields = [
             'id', 'name', 'host', 'ssh_user', 'ssh_port',
-            'ssh_key_path', 'is_active', 'created_at', 'updated_at',
+            'ssh_key', 'is_active', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 

@@ -4,7 +4,13 @@ Django Admin configuration for Dokku Toolbox.
 from django.contrib import admin
 from django.utils.html import format_html
 
-from .models import App, Command, ExecutionLog, Server
+from .models import App, Command, ExecutionLog, Server, SSHKey
+
+
+@admin.register(SSHKey)
+class SSHKeyAdmin(admin.ModelAdmin):
+    list_display = ['name', 'created_at', 'updated_at']
+    search_fields = ['name']
 
 
 @admin.register(Server)
@@ -15,7 +21,7 @@ class ServerAdmin(admin.ModelAdmin):
     list_editable = ['is_active']
     fieldsets = [
         (None, {'fields': ['name', 'is_active']}),
-        ('SSH Connection', {'fields': ['host', 'ssh_user', 'ssh_port', 'ssh_key_path']}),
+        ('SSH Connection', {'fields': ['host', 'ssh_user', 'ssh_port', 'ssh_key']}),
     ]
 
 

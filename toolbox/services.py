@@ -15,6 +15,7 @@ Key design decisions:
 import logging
 import time
 from dataclasses import dataclass, field
+from io import StringIO
 from typing import Optional
 
 import paramiko
@@ -66,10 +67,28 @@ def _build_ssh_client(server: Server) -> paramiko.SSHClient:
         'look_for_keys': True,
     }
 
-    if server.ssh_key_path:
-        connect_kwargs['key_filename'] = server.ssh_key_path
-        connect_kwargs['allow_agent'] = False
-        connect_kwargs['look_for_keys'] = False
+    if server.ssh_key:
+        if server.ssh_key.key_content:
+            # Attempt to load the key content. We try common formats.
+            key_io = StringIO(server.ssh_key.key_content.strip())
+            pkey = None
+            for key_class in [paramiko.RSAKey, paramiko.Ed25519Key, paramiko.ECDSAKey, paramiko.DSSKey]:
+                try:
+                    pkey = key_class.from_private_key(key_io)
+                    break
+                except (paramiko.SSHException, ValueError):
+                    key_io.seek(0)
+            
+            if pkey:
+                connect_kwargs['pkey'] = pkey
+                connect_kwargs['allow_agent'] = False
+                connect_kwargs['look_for_keys'] = False
+            else:
+                logger.error("Could not parse SSH key content for server %s", server.name)
+        elif server.ssh_key.key_path:
+            connect_kwargs['key_filename'] = server.ssh_key.key_path
+            connect_kwargs['allow_agent'] = False
+            connect_kwargs['look_for_keys'] = False
 
     client.connect(**connect_kwargs)
     return client

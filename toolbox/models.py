@@ -48,6 +48,39 @@ def validate_safe_command(value: str) -> None:
 
 # ─── Models ─────────────────────────────────────────────────────────────────
 
+class SSHKey(models.Model):
+    """Stores SSH private keys or paths to them."""
+
+    name = models.CharField(
+        max_length=100,
+        unique=True,
+        help_text="Human-readable label for this key.",
+    )
+    key_content = models.TextField(
+        blank=True,
+        help_text="Private key content (PEM/OpenSSH format).",
+    )
+    key_path = models.CharField(
+        max_length=512,
+        blank=True,
+        help_text="Absolute path to the private key file on this server.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "SSH Key"
+        verbose_name_plural = "SSH Keys"
+        ordering = ['name']
+
+    def __str__(self) -> str:
+        return self.name
+
+    def clean(self) -> None:
+        if not self.key_content and not self.key_path:
+            raise ValidationError("You must provide either key content or a key path.")
+
+
 class Server(models.Model):
     """SSH-reachable Dokku server."""
 
@@ -69,14 +102,13 @@ class Server(models.Model):
         default=22,
         validators=[MinValueValidator(1), MaxValueValidator(65535)],
     )
-    # SSH key path is intentionally optional: falls back to the agent / ~/.ssh/id_rsa
-    ssh_key_path = models.CharField(
-        max_length=512,
+    ssh_key = models.ForeignKey(
+        SSHKey,
+        on_delete=models.SET_NULL,
+        null=True,
         blank=True,
-        help_text=(
-            "Absolute path to the private key file on THIS machine. "
-            "Leave blank to use the SSH agent or default key."
-        ),
+        related_name='servers',
+        help_text="Select an SSH key. If blank, falls back to the SSH agent or default key.",
     )
     is_active = models.BooleanField(
         default=True,
