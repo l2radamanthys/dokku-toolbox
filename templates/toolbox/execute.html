@@ -1,0 +1,273 @@
+{% extends "toolbox/base.html" %}
+{% block title %}Execute Command — Dokku Toolbox{% endblock %}
+{% block nav_execute %}active{% endblock %}
+
+{% block page_header %}
+<h1>Execute Command</h1>
+<p>Select a validated command and target to run it remotely via SSH</p>
+{% endblock %}
+
+{% block content %}
+
+<div style="max-width:720px;">
+  <form method="post" action="{% url 'ui:execute-submit' %}" id="execute-form">
+    {% csrf_token %}
+
+    <!-- Command selector -->
+    <div class="card mb-20">
+      <div class="card-title">1 — Select Command</div>
+      <div class="form-group mb-16" style="display:flex;gap:16px;">
+        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;letter-spacing:normal;">
+          <input type="radio" name="cmd_source" value="template" checked onchange="onSourceChange()" /> Template
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;letter-spacing:normal;">
+          <input type="radio" name="cmd_source" value="custom" onchange="onSourceChange()" /> Custom
+        </label>
+      </div>
+
+      <div class="form-group" id="template-group">
+        <label for="command_id">Command Template</label>
+        <select id="command_id" name="command_id" onchange="onCommandChange()">
+          <option value="">— Choose a command —</option>
+          {% for cmd in commands %}
+          <option
+            value="{{ cmd.id }}"
+            data-type="{{ cmd.command_type }}"
+            data-cmd="{{ cmd.command }}"
+          >
+            [{{ cmd.get_command_type_display }}] {{ cmd.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- Command preview -->
+      <div id="cmd-preview" style="display:none;">
+        <div class="terminal-label">Expanded command preview</div>
+        <div class="terminal" id="cmd-preview-text" style="max-height:60px;padding:10px 14px;font-size:.8rem;"></div>
+      </div>
+      <!-- Custom Command Input -->
+      <div class="form-group" id="custom-group" style="display:none; margin-top:16px;">
+        <label for="custom_command">Custom Command</label>
+        <input type="text" id="custom_command" name="custom_command" placeholder="e.g. ps:restart" oninput="onCustomChange()" />
+        <div class="help-text">Use '{app}' as placeholder for app name. Custom commands support app scopes too.</div>
+      </div>
+    </div>
+
+    <!-- Server selector -->
+    <div class="card mb-20">
+      <div class="card-title">2 — Select Server</div>
+      <div class="form-group">
+        <label for="server_id">Target Server</label>
+        <select id="server_id" name="server_id" required onchange="onServerChange(this)">
+          <option value="">— Choose a server —</option>
+          {% for srv in servers %}
+          <option value="{{ srv.id }}" data-host="{{ srv.host }}" data-user="{{ srv.ssh_user }}" data-port="{{ srv.ssh_port }}">
+            {{ srv.name }} ({{ srv.ssh_user }}@{{ srv.host }}:{{ srv.ssh_port }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <!-- App selector (shown only for app-scoped commands) -->
+    <div class="card mb-20" id="app-section" style="display:none;">
+      <div class="card-title">3 — Select App</div>
+      <p class="text-muted" style="font-size:.8rem;margin-bottom:14px;">
+        This command is app-scoped. Select the target Dokku app.
+      </p>
+      <div class="form-group">
+        <label for="app_id">Dokku App</label>
+        <select id="app_id" name="app_id">
+          <option value="">— Choose an app —</option>
+          {% for app in apps %}
+          <option value="{{ app.id }}" data-server="{{ app.server_id }}">
+            {{ app.name }} ({{ app.server.name }})
+          </option>
+          {% endfor %}
+        </select>
+        <div class="help-text">Only apps on the selected server are shown.</div>
+      </div>
+    </div>
+
+    <!-- Full command preview -->
+    <div id="full-preview" class="card mb-24" style="display:none;">
+      <div class="card-title">SSH command that will be executed</div>
+      <div class="terminal" id="full-preview-text" style="max-height:80px;padding:12px 16px;font-size:.8rem;color:#e2e8f0;"></div>
+    </div>
+
+    <button type="submit" class="btn btn-primary" id="submit-btn" style="width:100%;justify-content:center;padding:14px;" disabled>
+      ▶ &nbsp; Execute Now
+    </button>
+    <p class="help-text" style="text-align:center;margin-top:8px;">
+      Command runs synchronously. Page will refresh with the result.
+    </p>
+  </form>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const allApps = {{ apps_json|safe }};
+  const allCommands = {{ commands_json|safe }};
+
+  let selectedCommandType = null;
+  let selectedServerId = null;
+  let selectedAppId = null;
+  let isCustom = false;
+
+  function onSourceChange() {
+    isCustom = document.querySelector('input[name="cmd_source"]:checked').value === 'custom';
+    document.getElementById('template-group').style.display = isCustom ? 'none' : 'block';
+    document.getElementById('custom-group').style.display = isCustom ? 'block' : 'none';
+    
+    // Require elements properly
+    document.getElementById('command_id').required = !isCustom;
+    document.getElementById('custom_command').required = isCustom;
+
+    // Reset some states
+    if (isCustom) {
+      document.getElementById('cmd-preview').style.display = 'none';
+      document.getElementById('app-section').style.display = 'block'; // Allow app scope for custom
+      selectedCommandType = 'app'; // Assume app scope might be needed
+    } else {
+      onCommandChange();
+    }
+    filterApps();
+    updatePreview();
+  }
+
+  function getSelectedOption(id) {
+    const el = document.getElementById(id);
+    return el.options[el.selectedIndex];
+  }
+
+  function updatePreview() {
+    const serverOpt = getSelectedOption('server_id');
+    const cmdOpt = getSelectedOption('command_id');
+    const appOpt = getSelectedOption('app_id');
+
+    const submitBtn = document.getElementById('submit-btn');
+    const fullPreview = document.getElementById('full-preview');
+    const fullPreviewText = document.getElementById('full-preview-text');
+
+    if (!serverOpt.value) {
+      fullPreview.style.display = 'none';
+      submitBtn.disabled = true;
+      return;
+    }
+
+    if (!isCustom && !cmdOpt.value) {
+      fullPreview.style.display = 'none';
+      submitBtn.disabled = true;
+      return;
+    }
+
+    const customCmdText = document.getElementById('custom_command').value.trim();
+    if (isCustom && !customCmdText) {
+      fullPreview.style.display = 'none';
+      submitBtn.disabled = true;
+      return;
+    }
+
+    const appName = (appOpt.value)
+      ? appOpt.text.split(' ')[0]
+      : '';
+
+    // If app is required by template but not selected
+    if (!isCustom && selectedCommandType === 'app' && !appName) {
+      fullPreview.style.display = 'none';
+      submitBtn.disabled = true;
+      return;
+    }
+
+    const user = serverOpt.dataset.user || 'dokku';
+    const host = serverOpt.dataset.host || '...';
+    const port = serverOpt.dataset.port || '22';
+
+    const rawCmd = isCustom ? customCmdText : (cmdOpt.dataset.cmd || '...');
+    let finalCmd = rawCmd;
+    let finalCmd = rawCmd;
+    
+    if (appName) {
+      if (finalCmd.includes('{app}')) {
+        finalCmd = finalCmd.replace('{app}', appName);
+      } else {
+        finalCmd = `${appName} ${finalCmd}`;
+      }
+    }
+
+    const portPart = port !== '22' ? ` -p ${port}` : '';
+
+    const cmd = `ssh${portPart} ${user}@${host} "${finalCmd}"`;
+    fullPreviewText.textContent = cmd;
+    fullPreview.style.display = 'block';
+    submitBtn.disabled = false;
+  }
+
+  function onCommandChange() {
+    if (isCustom) return;
+    const sel = document.getElementById('command_id');
+    const opt = sel.options[sel.selectedIndex];
+    const type = opt.dataset.type || null;
+    selectedCommandType = type;
+
+    const appSection = document.getElementById('app-section');
+    const appSelect = document.getElementById('app_id');
+    const preview = document.getElementById('cmd-preview');
+    const previewText = document.getElementById('cmd-preview-text');
+
+    if (type === 'app') {
+      appSection.style.display = 'block';
+      filterApps();
+    } else {
+      appSection.style.display = 'none';
+      appSelect.value = '';
+    }
+
+    // Show command hint
+    if (opt.value) {
+      preview.style.display = 'block';
+      previewText.textContent = `[app?] ${opt.dataset.cmd || '...'}`;
+    } else {
+      preview.style.display = 'none';
+    }
+
+    updatePreview();
+  }
+
+  function onCustomChange() {
+    updatePreview();
+  }
+
+  function onServerChange(sel) {
+    selectedServerId = sel.value ? parseInt(sel.value) : null;
+    filterApps();
+    updatePreview();
+  }
+
+  function filterApps() {
+    const appSelect = document.getElementById('app_id');
+    const current = appSelect.value;
+    appSelect.innerHTML = '<option value="">— Choose an app —</option>';
+
+    const filtered = selectedServerId
+      ? allApps.filter(a => a.server_id === selectedServerId)
+      : allApps;
+
+    filtered.forEach(app => {
+      const opt = document.createElement('option');
+      opt.value = app.id;
+      opt.textContent = app.name;
+      opt.dataset.server = app.server_id;
+      if (app.id == current) opt.selected = true;
+      appSelect.appendChild(opt);
+    });
+
+    updatePreview();
+  }
+
+  document.getElementById('app_id').addEventListener('change', updatePreview);
+</script>
+{% endblock %}

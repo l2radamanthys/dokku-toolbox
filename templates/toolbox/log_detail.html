@@ -1,0 +1,119 @@
+{% extends "toolbox/base.html" %}
+{% block title %}Log #{{ log.pk }} — Dokku Toolbox{% endblock %}
+{% block nav_logs %}active{% endblock %}
+
+{% block page_header %}
+<div class="flex-between" style="padding-bottom:20px;">
+  <div>
+    <h1>Execution Log #{{ log.pk }}</h1>
+    <p>{{ log.executed_at|date:"F j, Y @ H:i:s" }} UTC</p>
+  </div>
+  <div class="flex gap-8">
+    <a href="{% url 'ui:log-list' %}" class="btn btn-secondary">← Back to Logs</a>
+    <a href="{% url 'ui:execute' %}" class="btn btn-primary">▶ Run Again</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<!-- Meta cards -->
+<div class="grid-2 mb-24">
+  <div class="card">
+    <div class="card-title">Execution Details</div>
+    <table style="border:none;">
+      <tbody>
+        <tr>
+          <td style="border:none;padding:8px 0;color:var(--text-muted);font-size:.8rem;width:120px;">Status</td>
+          <td style="border:none;padding:8px 0;">
+            {% if log.status == 'success' %}
+              <span class="badge badge-success">✓ Success</span>
+            {% elif log.status == 'failure' %}
+              <span class="badge badge-danger">✗ Failure</span>
+            {% else %}
+              <span class="badge badge-warning">⚠ Error</span>
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td style="border:none;padding:8px 0;color:var(--text-muted);font-size:.8rem;">Exit Code</td>
+          <td style="border:none;padding:8px 0;">
+            <span class="mono {% if log.exit_code == 0 %}text-success{% elif log.exit_code %}text-danger{% endif %}">
+              {{ log.exit_code|default:"N/A" }}
+            </span>
+          </td>
+        </tr>
+        <tr>
+          <td style="border:none;padding:8px 0;color:var(--text-muted);font-size:.8rem;">Duration</td>
+          <td style="border:none;padding:8px 0;" class="mono">
+            {{ log.duration_seconds|floatformat:3 }}s
+          </td>
+        </tr>
+        <tr>
+          <td style="border:none;padding:8px 0;color:var(--text-muted);font-size:.8rem;">Triggered By</td>
+          <td style="border:none;padding:8px 0;">{{ log.triggered_by.username|default:"—" }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Target</div>
+    <table style="border:none;">
+      <tbody>
+        <tr>
+          <td style="border:none;padding:8px 0;color:var(--text-muted);font-size:.8rem;width:120px;">Server</td>
+          <td style="border:none;padding:8px 0;">{{ log.server.name|default:"—" }}</td>
+        </tr>
+        <tr>
+          <td style="border:none;padding:8px 0;color:var(--text-muted);font-size:.8rem;">Host</td>
+          <td style="border:none;padding:8px 0;" class="mono">
+            {{ log.server.ssh_user|default:"dokku" }}@{{ log.server.host|default:"—" }}
+          </td>
+        </tr>
+        <tr>
+          <td style="border:none;padding:8px 0;color:var(--text-muted);font-size:.8rem;">App</td>
+          <td style="border:none;padding:8px 0;">
+            {% if log.app %}
+              <span class="badge badge-info">{{ log.app.name }}</span>
+            {% else %}
+              <span class="text-muted">— (global command)</span>
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td style="border:none;padding:8px 0;color:var(--text-muted);font-size:.8rem;">Template</td>
+          <td style="border:none;padding:8px 0;">{{ log.command.name|default:"(deleted)" }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Command executed -->
+<div class="mb-20">
+  <div class="terminal-label">Command executed on remote server</div>
+  <div class="terminal" style="color:#93c5fd;max-height:80px;">{{ log.command_executed }}</div>
+</div>
+
+<!-- Stdout -->
+<div class="mb-20">
+  <div class="terminal-label">Standard Output (stdout)</div>
+  {% if log.stdout %}
+  <div class="terminal">{{ log.stdout }}</div>
+  {% else %}
+  <div class="terminal" style="color:var(--text-muted);font-style:italic;">(empty)</div>
+  {% endif %}
+</div>
+
+<!-- Stderr -->
+<div class="mb-20">
+  <div class="terminal-label">Standard Error (stderr)</div>
+  {% if log.stderr %}
+  <div class="terminal stderr">{{ log.stderr }}</div>
+  {% else %}
+  <div class="terminal" style="color:var(--text-muted);font-style:italic;">(empty)</div>
+  {% endif %}
+</div>
+
+{% endblock %}

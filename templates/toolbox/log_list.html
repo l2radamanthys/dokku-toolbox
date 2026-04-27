@@ -1,0 +1,159 @@
+{% extends "toolbox/base.html" %}
+{% block title %}Execution Logs — Dokku Toolbox{% endblock %}
+{% block nav_logs %}active{% endblock %}
+
+{% block page_header %}
+<h1>Execution Logs</h1>
+<p>Full audit trail of all remote commands — filterable by server, app, and date</p>
+{% endblock %}
+
+{% block content %}
+
+<!-- Filters -->
+<form method="get" id="filter-form">
+  <div class="filters-bar mb-20">
+    <div class="form-group">
+      <label for="f-server">Server</label>
+      <select id="f-server" name="server" onchange="this.form.submit()">
+        <option value="">All Servers</option>
+        {% for srv in servers %}
+        <option value="{{ srv.id }}" {% if filters.server == srv.id|stringformat:'d' %}selected{% endif %}>
+          {{ srv.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="f-app">App</label>
+      <select id="f-app" name="app" onchange="this.form.submit()">
+        <option value="">All Apps</option>
+        {% for app in apps %}
+        <option value="{{ app.id }}" {% if filters.app == app.id|stringformat:'d' %}selected{% endif %}>
+          {{ app.name }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="f-status">Status</label>
+      <select id="f-status" name="status" onchange="this.form.submit()">
+        <option value="">All Status</option>
+        {% for val, label in status_choices %}
+        <option value="{{ val }}" {% if filters.status == val %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="f-from">From</label>
+      <input type="date" id="f-from" name="date_from" value="{{ filters.date_from|default:'' }}" />
+    </div>
+    <div class="form-group">
+      <label for="f-to">To</label>
+      <input type="date" id="f-to" name="date_to" value="{{ filters.date_to|default:'' }}" />
+    </div>
+    <div style="display:flex;gap:8px;align-items:flex-end;">
+      <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+      <a href="{% url 'ui:log-list' %}" class="btn btn-secondary btn-sm">Clear</a>
+    </div>
+  </div>
+</form>
+
+<!-- Results count -->
+<div class="flex-between mb-16">
+  <span class="text-muted" style="font-size:.85rem;">
+    {{ page.paginator.count }} execution{{ page.paginator.count|pluralize }} found
+  </span>
+</div>
+
+<!-- Table -->
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Command</th>
+        <th>App</th>
+        <th>Server</th>
+        <th>Status</th>
+        <th>Exit</th>
+        <th>Duration</th>
+        <th>By</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in page %}
+      <tr>
+        <td class="mono text-muted" style="font-size:.75rem;white-space:nowrap;">
+          {{ log.executed_at|date:"M d, H:i:s" }}
+        </td>
+        <td class="mono" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ log.command_executed }}">
+          {{ log.command_executed|truncatechars:55 }}
+        </td>
+        <td>
+          {% if log.app %}
+            <span class="badge badge-info">{{ log.app.name }}</span>
+          {% else %}
+            <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+        <td>{{ log.server.name|default:"—" }}</td>
+        <td>
+          {% if log.status == 'success' %}
+            <span class="badge badge-success">Success</span>
+          {% elif log.status == 'failure' %}
+            <span class="badge badge-danger">Failure</span>
+          {% else %}
+            <span class="badge badge-warning">Error</span>
+          {% endif %}
+        </td>
+        <td class="mono">
+          {% if log.exit_code is not None %}
+            <span class="{% if log.exit_code == 0 %}text-success{% else %}text-danger{% endif %}">
+              {{ log.exit_code }}
+            </span>
+          {% else %}—{% endif %}
+        </td>
+        <td class="mono text-muted">
+          {% if log.duration_seconds %}{{ log.duration_seconds|floatformat:2 }}s{% else %}—{% endif %}
+        </td>
+        <td class="text-muted" style="font-size:.8rem;">
+          {{ log.triggered_by.username|default:"—" }}
+        </td>
+        <td>
+          <a href="{% url 'ui:log-detail' log.pk %}" class="btn btn-secondary btn-sm">Detail</a>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="9" style="text-align:center;padding:48px;color:var(--text-muted);">
+          No executions match your filters.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Pagination -->
+{% if page.has_other_pages %}
+<div class="pagination">
+  {% if page.has_previous %}
+    <a href="?page={{ page.previous_page_number }}&server={{ filters.server|default:'' }}&app={{ filters.app|default:'' }}&status={{ filters.status|default:'' }}&date_from={{ filters.date_from|default:'' }}&date_to={{ filters.date_to|default:'' }}">← Prev</a>
+  {% endif %}
+
+  {% for num in page.paginator.page_range %}
+    {% if page.number == num %}
+      <span class="current">{{ num }}</span>
+    {% elif num > page.number|add:'-3' and num < page.number|add:'3' %}
+      <a href="?page={{ num }}&server={{ filters.server|default:'' }}&app={{ filters.app|default:'' }}&status={{ filters.status|default:'' }}&date_from={{ filters.date_from|default:'' }}&date_to={{ filters.date_to|default:'' }}">{{ num }}</a>
+    {% endif %}
+  {% endfor %}
+
+  {% if page.has_next %}
+    <a href="?page={{ page.next_page_number }}&server={{ filters.server|default:'' }}&app={{ filters.app|default:'' }}&status={{ filters.status|default:'' }}&date_from={{ filters.date_from|default:'' }}&date_to={{ filters.date_to|default:'' }}">Next →</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

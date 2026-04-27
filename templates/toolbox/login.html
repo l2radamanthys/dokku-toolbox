@@ -1,0 +1,42 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign In — Dokku Toolbox</title>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}" />
+</head>
+<body>
+<div class="login-page">
+  <div class="login-card fade-in">
+    <div class="login-logo">
+      <div class="brand">⚙ Dokku Toolbox</div>
+      <div style="font-size:.8rem;color:var(--text-muted);margin-top:4px;">DevOps Remote Console</div>
+    </div>
+
+    {% if form.errors %}
+    <div class="alert alert-error">
+      ❌ Invalid credentials. Please try again.
+    </div>
+    {% endif %}
+
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ next }}" />
+      <div class="form-group">
+        <label for="id_username">Username</label>
+        <input type="text" id="id_username" name="username" autofocus required placeholder="admin" />
+      </div>
+      <div class="form-group">
+        <label for="id_password">Password</label>
+        <input type="password" id="id_password" name="password" required placeholder="••••••••" />
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;padding:12px;margin-top:8px;">
+        Sign In →
+      </button>
+    </form>
+  </div>
+</div>
+</body>
+</html>

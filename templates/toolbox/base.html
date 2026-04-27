@@ -1,0 +1,95 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Dokku Toolbox{% endblock %}</title>
+  <meta name="description" content="Remote Dokku server management and command execution dashboard" />
+  <link rel="stylesheet" href="{% static 'css/app.css' %}" />
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+{% if messages %}
+<div id="flash-messages" style="position:fixed;top:16px;right:16px;z-index:9999;max-width:380px;">
+  {% for msg in messages %}
+  <div class="alert alert-{{ msg.tags|default:'info' }} fade-in" style="margin-bottom:10px;box-shadow:var(--shadow-md);">
+    {% if msg.tags == 'success' %}✅{% elif msg.tags == 'error' %}❌{% else %}ℹ️{% endif %}
+    <div>{{ msg }}</div>
+    <button onclick="this.parentElement.remove()" style="background:none;border:none;cursor:pointer;color:inherit;margin-left:auto;padding:0 4px;font-size:1.1rem;" aria-label="Close">×</button>
+  </div>
+  {% endfor %}
+</div>
+<script>
+  setTimeout(() => {
+    document.querySelectorAll('#flash-messages .alert').forEach(el => el.remove());
+  }, 5000);
+</script>
+{% endif %}
+
+<div class="app-layout">
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-title">⚙ Dokku Toolbox</div>
+      <div class="logo-sub">DevOps Remote Console</div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Main</div>
+      <a href="{% url 'ui:dashboard' %}" class="nav-link {% block nav_dashboard %}{% endblock %}">
+        <span class="icon">📊</span> Dashboard
+      </a>
+      <a href="{% url 'ui:execute' %}" class="nav-link {% block nav_execute %}{% endblock %}">
+        <span class="icon">▶</span> Execute
+      </a>
+      <a href="{% url 'ui:log-list' %}" class="nav-link {% block nav_logs %}{% endblock %}">
+        <span class="icon">📋</span> Execution Logs
+      </a>
+
+      <div class="nav-section-label" style="margin-top:12px;">Admin</div>
+      <a href="/admin/toolbox/server/" class="nav-link">
+        <span class="icon">🖥</span> Servers
+      </a>
+      <a href="/admin/toolbox/app/" class="nav-link">
+        <span class="icon">📦</span> Apps
+      </a>
+      <a href="/admin/toolbox/command/" class="nav-link">
+        <span class="icon">💬</span> Commands
+      </a>
+      <a href="/admin/" class="nav-link">
+        <span class="icon">🛡</span> Django Admin
+      </a>
+
+      <div class="nav-section-label" style="margin-top:12px;">API</div>
+      <a href="/api/" class="nav-link">
+        <span class="icon">🔌</span> Browsable API
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-pill">
+        <div class="avatar">{{ request.user.username|first|upper }}</div>
+        <div>
+          <div style="font-weight:500;color:var(--text-primary)">{{ request.user.username }}</div>
+          <a href="{% url 'ui:logout' %}" style="font-size:.72rem;color:var(--text-muted)">Sign out</a>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main-content">
+    <div class="page-header">
+      {% block page_header %}{% endblock %}
+    </div>
+    <div class="page-body fade-in">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+</div>
+
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

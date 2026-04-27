@@ -1,0 +1,101 @@
+{% extends "toolbox/base.html" %}
+{% block title %}Dashboard — Dokku Toolbox{% endblock %}
+{% block nav_dashboard %}active{% endblock %}
+
+{% block page_header %}
+<h1>Dashboard</h1>
+<p>Overview of your Dokku infrastructure</p>
+{% endblock %}
+
+{% block content %}
+
+<!-- Stats -->
+<div class="stats-grid">
+  <div class="stat-card" style="--accent-color: var(--accent);">
+    <div class="stat-icon">🖥</div>
+    <div class="stat-value">{{ server_count }}</div>
+    <div class="stat-label">Active Servers</div>
+  </div>
+  <div class="stat-card" style="--accent-color: #a78bfa;">
+    <div class="stat-icon">📦</div>
+    <div class="stat-value">{{ app_count }}</div>
+    <div class="stat-label">Registered Apps</div>
+  </div>
+  <div class="stat-card" style="--accent-color: var(--info);">
+    <div class="stat-icon">💬</div>
+    <div class="stat-value">{{ command_count }}</div>
+    <div class="stat-label">Available Commands</div>
+  </div>
+  <div class="stat-card" style="--accent-color: var(--success);">
+    <div class="stat-icon">✅</div>
+    <div class="stat-value">{{ success_count }}</div>
+    <div class="stat-label">Successful Executions</div>
+  </div>
+  <div class="stat-card" style="--accent-color: var(--danger);">
+    <div class="stat-icon">❌</div>
+    <div class="stat-value">{{ failure_count }}</div>
+    <div class="stat-label">Failed Executions</div>
+  </div>
+  <div class="stat-card" style="--accent-color: var(--warning);">
+    <div class="stat-icon">⚠</div>
+    <div class="stat-value">{{ error_count }}</div>
+    <div class="stat-label">SSH Errors</div>
+  </div>
+</div>
+
+<!-- Quick actions -->
+<div class="flex-between mb-20">
+  <h2 style="font-size:1rem;font-weight:600;">Recent Executions</h2>
+  <div class="flex gap-8">
+    <a href="{% url 'ui:execute' %}" class="btn btn-primary">▶ Execute Command</a>
+    <a href="{% url 'ui:log-list' %}" class="btn btn-secondary">View All Logs →</a>
+  </div>
+</div>
+
+<!-- Recent logs table -->
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Command</th>
+        <th>App</th>
+        <th>Server</th>
+        <th>Status</th>
+        <th>Duration</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in recent_logs %}
+      <tr>
+        <td class="mono text-muted" style="font-size:.75rem;">{{ log.executed_at|date:"M d, H:i:s" }}</td>
+        <td class="mono">{{ log.command_executed|truncatechars:50 }}</td>
+        <td>{{ log.app.name|default:"—" }}</td>
+        <td>{{ log.server.name|default:"—" }}</td>
+        <td>
+          {% if log.status == 'success' %}
+            <span class="badge badge-success">Success</span>
+          {% elif log.status == 'failure' %}
+            <span class="badge badge-danger">Failure</span>
+          {% else %}
+            <span class="badge badge-warning">Error</span>
+          {% endif %}
+        </td>
+        <td class="mono text-muted">{% if log.duration_seconds %}{{ log.duration_seconds|floatformat:2 }}s{% else %}—{% endif %}</td>
+        <td>
+          <a href="{% url 'ui:log-detail' log.pk %}" class="btn btn-secondary btn-sm">Detail</a>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="7" style="text-align:center;padding:32px;color:var(--text-muted);">
+          No executions yet. <a href="{% url 'ui:execute' %}">Run your first command →</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
