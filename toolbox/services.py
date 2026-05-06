@@ -269,3 +269,185 @@ def execute_command_on_apps(
         )
         logs.append(log)
     return logs
+
+
+# ─── Config management ──────────────────────────────────────────────────────
+
+@dataclass
+class ConfigResult:
+    """Holds the outcome of a config:show operation."""
+    config: dict[str, str] = field(default_factory=dict)
+    raw_output: str = ''
+    error: str = ''
+    success: bool = False
+
+
+def _parse_config_output(raw: str) -> dict[str, str]:
+    """
+    Parse the output of `dokku config:show <app>`.
+    Format is typically:
+        =====> <app> env vars
+        KEY:  value
+        KEY2: value2
+    """
+    config = {}
+    for line in raw.splitlines():
+        # Skip header lines (e.g. "=====> app env vars")
+        if line.startswith('=====') or not line.strip():
+            continue
+        # Split on first colon followed by spaces
+        if ':' in line:
+            key, _, value = line.partition(':')
+            key = key.strip()
+            value = value.strip()
+            if key:
+                config[key] = value
+    return config
+
+
+def fetch_app_config(
+    *,
+    app: App,
+    triggered_by: Optional[User] = None,
+) -> ConfigResult:
+    """
+    Fetch the environment configuration of a Dokku app via `config:show`.
+    Returns a ConfigResult with parsed key-value pairs.
+    """
+    result = ConfigResult()
+    server = app.server
+
+    if not server.is_active:
+        result.error = f"Server '{server.name}' is not active."
+        return result
+
+    remote_cmd = f"config:show {app.name}"
+    logger.info(
+        "Fetching config for app '%s' on %s (triggered_by=%s)",
+        app.name, server.host, triggered_by,
+    )
+
+    client = None
+    try:
+        client = _build_ssh_client(server)
+        timeout = getattr(settings, 'SSH_COMMAND_TIMEOUT', 60)
+        exec_result = _run_remote(client, remote_cmd, timeout=timeout)
+
+        result.raw_output = exec_result.stdout
+        if exec_result.status == ExecutionLog.STATUS_SUCCESS:
+            result.config = _parse_config_output(exec_result.stdout)
+            result.success = True
+        else:
+            result.error = exec_result.stderr or exec_result.error_message or 'Unknown error'
+
+        # Log the execution
+        ExecutionLog.objects.create(
+            command=None,
+            app=app,
+            server=server,
+            command_executed=remote_cmd,
+            stdout=exec_result.stdout,
+            stderr=exec_result.stderr,
+            exit_code=exec_result.exit_code,
+            status=exec_result.status,
+            duration_seconds=exec_result.duration_seconds,
+            triggered_by=triggered_by,
+        )
+
+    except (paramiko.AuthenticationException, paramiko.SSHException, OSError) as exc:
+        result.error = str(exc)
+        logger.error("SSH error fetching config for %s: %s", app.name, exc)
+    finally:
+        if client:
+            client.close()
+
+    return result
+
+
+def set_app_config(
+    *,
+    app: App,
+    variables: dict[str, str],
+    triggered_by: Optional[User] = None,
+) -> ExecutionLog:
+    """
+    Set environment variables on a Dokku app via `config:set`.
+    *variables* is a dict of KEY=VALUE pairs to set.
+    Returns an ExecutionLog record.
+    """
+    from .models import validate_safe_command
+
+    server = app.server
+    if not server.is_active:
+        raise ValueError(f"Server '{server.name}' is not active.")
+
+    if not variables:
+        raise ValueError("No variables provided to set.")
+
+    # Build KEY=VALUE pairs — values may contain spaces, so wrap in single quotes
+    # inside the SSH command. We validate keys for safety.
+    pairs = []
+    for key, value in variables.items():
+        # Validate key: uppercase letters, digits, underscores only
+        if not key or not all(c.isalnum() or c == '_' for c in key):
+            raise ValueError(
+                f"Invalid variable name '{key}'. "
+                "Use uppercase letters, digits, and underscores only."
+            )
+        pairs.append(f"{key}={value}")
+
+    pairs_str = ' '.join(pairs)
+    remote_cmd = f"config:set --no-restart {app.name} {pairs_str}"
+
+    # Validate the full command for shell safety
+    validate_safe_command(remote_cmd)
+
+    logger.info(
+        "Setting config for app '%s' on %s: %s (triggered_by=%s)",
+        app.name, server.host, pairs_str, triggered_by,
+    )
+
+    return execute_command(
+        custom_command=remote_cmd,
+        server=server,
+        triggered_by=triggered_by,
+    )
+
+
+def unset_app_config(
+    *,
+    app: App,
+    keys: list[str],
+    triggered_by: Optional[User] = None,
+) -> ExecutionLog:
+    """
+    Unset (remove) environment variables from a Dokku app via `config:unset`.
+    Returns an ExecutionLog record.
+    """
+    server = app.server
+    if not server.is_active:
+        raise ValueError(f"Server '{server.name}' is not active.")
+
+    if not keys:
+        raise ValueError("No variable keys provided to unset.")
+
+    for key in keys:
+        if not key or not all(c.isalnum() or c == '_' for c in key):
+            raise ValueError(
+                f"Invalid variable name '{key}'. "
+                "Use uppercase letters, digits, and underscores only."
+            )
+
+    keys_str = ' '.join(keys)
+    remote_cmd = f"config:unset --no-restart {app.name} {keys_str}"
+
+    logger.info(
+        "Unsetting config keys for app '%s' on %s: %s (triggered_by=%s)",
+        app.name, server.host, keys_str, triggered_by,
+    )
+
+    return execute_command(
+        custom_command=remote_cmd,
+        server=server,
+        triggered_by=triggered_by,
+    )

@@ -44,6 +44,9 @@
       <a href="{% url 'ui:execute' %}" class="nav-link {% block nav_execute %}{% endblock %}">
         <span class="icon">▶</span> Execute
       </a>
+      <a href="{% url 'ui:app-config' %}" class="nav-link {% block nav_config %}{% endblock %}">
+        <span class="icon">🔧</span> App Config
+      </a>
       <a href="{% url 'ui:log-list' %}" class="nav-link {% block nav_logs %}{% endblock %}">
         <span class="icon">📋</span> Execution Logs
       </a>

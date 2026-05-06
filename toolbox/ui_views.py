@@ -13,7 +13,13 @@ from django.views.decorators.http import require_POST
 
 from .models import App, Command, ExecutionLog, Server
 from .serializers import ExecutionLogSerializer
-from .services import execute_command, execute_command_on_apps
+from .services import (
+    execute_command,
+    execute_command_on_apps,
+    fetch_app_config,
+    set_app_config,
+    unset_app_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -148,3 +154,116 @@ def log_detail(request, pk):
         pk=pk,
     )
     return render(request, 'toolbox/log_detail.html', {'log': log})
+
+
+# ─── App Config Management ───────────────────────────────────────────────────
+
+@login_required
+def app_config_view(request):
+    """Render the config management page with server/app selectors."""
+    servers = Server.objects.filter(is_active=True)
+    apps = App.objects.filter(is_active=True).select_related('server')
+
+    context = {
+        'servers': servers,
+        'apps': apps,
+        'apps_json': json.dumps(
+            [{'id': a.id, 'name': a.name, 'server_id': a.server_id} for a in apps]
+        ),
+    }
+    return render(request, 'toolbox/app_config.html', context)
+
+
+@login_required
+def app_config_fetch(request):
+    """AJAX endpoint: return config for the selected app as JSON."""
+    app_id = request.GET.get('app_id')
+    if not app_id:
+        return JsonResponse({'error': 'app_id is required.'}, status=400)
+
+    app = get_object_or_404(App.objects.select_related('server'), pk=app_id, is_active=True)
+
+    config_result = fetch_app_config(
+        app=app,
+        triggered_by=request.user if request.user.is_authenticated else None,
+    )
+
+    if not config_result.success:
+        return JsonResponse({'error': config_result.error}, status=502)
+
+    return JsonResponse({
+        'app_id': app.id,
+        'app_name': app.name,
+        'server_name': app.server.name,
+        'config': config_result.config,
+        'raw_output': config_result.raw_output,
+    })
+
+
+@login_required
+@require_POST
+def app_config_submit(request):
+    """Handle config modifications from the UI form."""
+    app_id = request.POST.get('app_id')
+    action = request.POST.get('action', 'set')
+
+    if not app_id:
+        messages.error(request, 'App is required.')
+        return redirect('ui:app-config')
+
+    app = get_object_or_404(App.objects.select_related('server'), pk=app_id, is_active=True)
+
+    if action == 'unset':
+        # Unset variables
+        keys_raw = request.POST.get('unset_keys', '').strip()
+        if not keys_raw:
+            messages.error(request, 'No variable keys specified for removal.')
+            return redirect('ui:app-config')
+
+        keys = [k.strip() for k in keys_raw.split(',') if k.strip()]
+        try:
+            log = unset_app_config(
+                app=app,
+                keys=keys,
+                triggered_by=request.user,
+            )
+            if log.status == ExecutionLog.STATUS_SUCCESS:
+                messages.success(request, f"Successfully removed {len(keys)} variable(s) from {app.name}.")
+            else:
+                messages.warning(request, f"Unset completed with status: {log.get_status_display()}")
+        except ValueError as exc:
+            messages.error(request, str(exc))
+
+    else:
+        # Set variables
+        var_keys = request.POST.getlist('var_key')
+        var_values = request.POST.getlist('var_value')
+
+        if not var_keys:
+            messages.error(request, 'No variables provided.')
+            return redirect('ui:app-config')
+
+        variables = {}
+        for k, v in zip(var_keys, var_values):
+            k = k.strip()
+            if k:
+                variables[k] = v
+
+        if not variables:
+            messages.error(request, 'No valid variables to set.')
+            return redirect('ui:app-config')
+
+        try:
+            log = set_app_config(
+                app=app,
+                variables=variables,
+                triggered_by=request.user,
+            )
+            if log.status == ExecutionLog.STATUS_SUCCESS:
+                messages.success(request, f"Successfully set {len(variables)} variable(s) on {app.name}.")
+            else:
+                messages.warning(request, f"Config set completed with status: {log.get_status_display()}")
+        except ValueError as exc:
+            messages.error(request, str(exc))
+
+    return redirect('ui:app-config')

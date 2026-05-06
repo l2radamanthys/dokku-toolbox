@@ -12,14 +12,23 @@ from rest_framework.views import APIView
 
 from .models import App, Command, ExecutionLog, Server
 from .serializers import (
+    AppConfigSerializer,
     AppSerializer,
     CommandSerializer,
     ExecuteCommandSerializer,
     ExecuteOnAppsSerializer,
     ExecutionLogSerializer,
     ServerSerializer,
+    SetConfigSerializer,
+    UnsetConfigSerializer,
 )
-from .services import execute_command, execute_command_on_apps
+from .services import (
+    execute_command,
+    execute_command_on_apps,
+    fetch_app_config,
+    set_app_config,
+    unset_app_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -147,5 +156,112 @@ class ExecuteOnAppsView(APIView):
 
         return Response(
             ExecutionLogSerializer(logs, many=True).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+# ─── Config management endpoints ─────────────────────────────────────────────
+
+class AppConfigView(APIView):
+    """
+    GET /api/config/<app_id>/
+    Fetch the Dokku environment config for a specific app.
+    """
+
+    def get(self, request: Request, app_id: int) -> Response:
+        try:
+            app = App.objects.select_related('server').get(pk=app_id, is_active=True)
+        except App.DoesNotExist:
+            return Response(
+                {'detail': 'App not found or inactive.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        config_result = fetch_app_config(
+            app=app,
+            triggered_by=request.user if request.user.is_authenticated else None,
+        )
+
+        if not config_result.success:
+            return Response(
+                {'detail': config_result.error},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response({
+            'app_id': app.id,
+            'app_name': app.name,
+            'server_name': app.server.name,
+            'config': config_result.config,
+            'raw_output': config_result.raw_output,
+        })
+
+
+class SetAppConfigView(APIView):
+    """
+    POST /api/config/set/
+    Set environment variables on a Dokku app.
+    """
+
+    def post(self, request: Request) -> Response:
+        ser = SetConfigSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        app: App = ser.validated_data['app_id']
+        variables: dict = ser.validated_data['variables']
+
+        try:
+            log = set_app_config(
+                app=app,
+                variables=variables,
+                triggered_by=request.user if request.user.is_authenticated else None,
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            logger.exception("Unexpected error during set_app_config: %s", exc)
+            return Response(
+                {'detail': 'Unexpected server error. Check logs.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response(
+            ExecutionLogSerializer(log).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class UnsetAppConfigView(APIView):
+    """
+    POST /api/config/unset/
+    Remove environment variables from a Dokku app.
+    """
+
+    def post(self, request: Request) -> Response:
+        ser = UnsetConfigSerializer(data=request.data)
+        if not ser.is_valid():
+            return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        app: App = ser.validated_data['app_id']
+        keys: list[str] = ser.validated_data['keys']
+
+        try:
+            log = unset_app_config(
+                app=app,
+                keys=keys,
+                triggered_by=request.user if request.user.is_authenticated else None,
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:
+            logger.exception("Unexpected error during unset_app_config: %s", exc)
+            return Response(
+                {'detail': 'Unexpected server error. Check logs.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response(
+            ExecutionLogSerializer(log).data,
             status=status.HTTP_201_CREATED,
         )

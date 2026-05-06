@@ -103,3 +103,56 @@ class ExecuteOnAppsSerializer(serializers.Serializer):
         queryset=App.objects.filter(is_active=True),
         many=True,
     )
+
+
+# ─── Config management serializers ──────────────────────────────────────────
+
+class AppConfigSerializer(serializers.Serializer):
+    """Response serializer for config:show output."""
+    app_id = serializers.IntegerField()
+    app_name = serializers.CharField()
+    server_name = serializers.CharField()
+    config = serializers.DictField(child=serializers.CharField())
+    raw_output = serializers.CharField()
+
+
+class SetConfigSerializer(serializers.Serializer):
+    """Payload for setting environment variables."""
+    app_id = serializers.PrimaryKeyRelatedField(
+        queryset=App.objects.filter(is_active=True)
+    )
+    variables = serializers.DictField(
+        child=serializers.CharField(allow_blank=True),
+        help_text="Dictionary of KEY: VALUE pairs to set.",
+    )
+
+    def validate_variables(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one variable must be provided.")
+        for key in value.keys():
+            if not key or not all(c.isalnum() or c == '_' for c in key):
+                raise serializers.ValidationError(
+                    f"Invalid variable name '{key}'. Use letters, digits, and underscores only."
+                )
+        return value
+
+
+class UnsetConfigSerializer(serializers.Serializer):
+    """Payload for removing environment variables."""
+    app_id = serializers.PrimaryKeyRelatedField(
+        queryset=App.objects.filter(is_active=True)
+    )
+    keys = serializers.ListField(
+        child=serializers.CharField(),
+        help_text="List of variable names to unset.",
+    )
+
+    def validate_keys(self, value):
+        if not value:
+            raise serializers.ValidationError("At least one key must be provided.")
+        for key in value:
+            if not key or not all(c.isalnum() or c == '_' for c in key):
+                raise serializers.ValidationError(
+                    f"Invalid variable name '{key}'. Use letters, digits, and underscores only."
+                )
+        return value

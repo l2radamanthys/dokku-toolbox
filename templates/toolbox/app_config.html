@@ -1,0 +1,341 @@
+{% extends "toolbox/base.html" %}
+{% block title %}App Configuration — Dokku Toolbox{% endblock %}
+{% block nav_config %}active{% endblock %}
+
+{% block page_header %}
+<h1>App Configuration</h1>
+<p>Manage environment variables for your Dokku apps</p>
+{% endblock %}
+
+{% block content %}
+
+<div class="grid-2">
+  <!-- Left column: Selection & Fetch -->
+  <div>
+    <div class="card mb-20">
+      <div class="card-title">1 — Select Target</div>
+      
+      <div class="form-group">
+        <label for="server_id">Server</label>
+        <select id="server_id" onchange="onServerChange(this)">
+          <option value="">— Choose a server —</option>
+          {% for srv in servers %}
+          <option value="{{ srv.id }}">{{ srv.name }} ({{ srv.host }})</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group" id="app-group" style="display:none;">
+        <label for="app_id">App</label>
+        <select id="app_id" onchange="onAppChange()">
+          <option value="">— Choose an app —</option>
+          <!-- populated via JS -->
+        </select>
+      </div>
+      
+      <button class="btn btn-primary" id="fetch-btn" onclick="fetchConfig()" disabled style="width:100%; justify-content:center;">
+        <span class="icon">🔄</span> Fetch Configuration
+      </button>
+    </div>
+
+    <!-- Set Config Form -->
+    <div class="card mb-20" id="set-config-card" style="display:none;">
+      <div class="flex-between mb-16">
+        <div class="card-title" style="margin-bottom:0;">Set Variables</div>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="addVarRow()">+ Add Row</button>
+      </div>
+      <form method="post" action="{% url 'ui:app-config-submit' %}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="set" />
+        <input type="hidden" name="app_id" class="target_app_id" value="" />
+        
+        <div id="var-rows">
+          <div class="flex gap-12 mb-12 var-row">
+            <input type="text" name="var_key" placeholder="KEY (e.g. DATABASE_URL)" style="flex:1; font-family:var(--font-mono); font-size:.8rem;" />
+            <input type="text" name="var_value" placeholder="Value" style="flex:2; font-family:var(--font-mono); font-size:.8rem;" />
+            <button type="button" class="btn btn-secondary btn-sm" onclick="this.parentElement.remove()" style="padding:6px 10px;" aria-label="Remove row">×</button>
+          </div>
+        </div>
+        
+        <button type="submit" class="btn btn-primary mt-16" style="width:100%; justify-content:center; padding:12px;">
+          Set Variables
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Right column: Current Config -->
+  <div>
+    <div class="card" id="current-config-card" style="display:none; height:100%;">
+      <div class="flex-between mb-16">
+        <div class="card-title" style="margin-bottom:0;">Current Configuration</div>
+        <form method="post" action="{% url 'ui:app-config-submit' %}" id="unset-form" style="display:none;" onsubmit="return confirmUnset()">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="unset" />
+          <input type="hidden" name="app_id" class="target_app_id" value="" />
+          <input type="hidden" name="unset_keys" id="unset_keys_input" value="" />
+          <button type="submit" class="btn btn-sm btn-danger">Delete Selected</button>
+        </form>
+      </div>
+      
+      <div id="config-loading" style="display:none; text-align:center; padding:40px 0; color:var(--text-muted);">
+        <div class="live-dot" style="margin-bottom:12px;"></div>
+        <div>Fetching configuration securely...</div>
+      </div>
+
+      <div id="config-empty" style="display:none; text-align:center; padding:40px 0; color:var(--text-muted);">
+        No environment variables found.
+      </div>
+
+      <div id="config-error" class="alert alert-error" style="display:none; margin-bottom:0;">
+      </div>
+
+      <div class="table-wrap" id="config-table-wrap" style="display:none;">
+        <table id="config-table">
+          <thead>
+            <tr>
+              <th style="width:40px; text-align:center;"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)" aria-label="Select all variables" /></th>
+              <th>Key</th>
+              <th>Value</th>
+            </tr>
+          </thead>
+          <tbody id="config-tbody">
+            <!-- populated via JS -->
+          </tbody>
+        </table>
+      </div>
+      
+      <div id="config-raw-wrap" style="display:none; margin-top:20px;">
+        <div class="terminal-label">Raw Output</div>
+        <div class="terminal" id="config-raw" style="max-height:200px;"></div>
+      </div>
+    </div>
+    
+    <div class="card" id="placeholder-card" style="height:100%; display:flex; align-items:center; justify-content:center; color:var(--text-muted); text-align:center; padding:40px;">
+      <div>
+        <div style="font-size:2rem; margin-bottom:10px;">🔧</div>
+        <div>Select an app and fetch its configuration to view and manage environment variables.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<style>
+.var-row input:focus { border-color: var(--accent); }
+.mt-16 { margin-top: 16px; }
+.mb-12 { margin-bottom: 12px; }
+</style>
+<script>
+  const allApps = {{ apps_json|safe }};
+  
+  function onServerChange(sel) {
+    const serverId = sel.value ? parseInt(sel.value) : null;
+    const appGroup = document.getElementById('app-group');
+    const appSelect = document.getElementById('app_id');
+    const fetchBtn = document.getElementById('fetch-btn');
+    
+    appSelect.innerHTML = '<option value="">— Choose an app —</option>';
+    
+    if (serverId) {
+      appGroup.style.display = 'block';
+      const filteredApps = allApps.filter(a => a.server_id === serverId);
+      filteredApps.forEach(app => {
+        const opt = document.createElement('option');
+        opt.value = app.id;
+        opt.textContent = app.name;
+        appSelect.appendChild(opt);
+      });
+    } else {
+      appGroup.style.display = 'none';
+    }
+    
+    fetchBtn.disabled = true;
+    resetUI();
+  }
+
+  function onAppChange() {
+    const appSelect = document.getElementById('app_id');
+    const fetchBtn = document.getElementById('fetch-btn');
+    fetchBtn.disabled = !appSelect.value;
+    
+    // Update hidden inputs for forms
+    document.querySelectorAll('.target_app_id').forEach(input => {
+      input.value = appSelect.value;
+    });
+    
+    resetUI();
+  }
+  
+  function resetUI() {
+    document.getElementById('set-config-card').style.display = 'none';
+    document.getElementById('current-config-card').style.display = 'none';
+    document.getElementById('placeholder-card').style.display = 'flex';
+  }
+
+  function addVarRow() {
+    const rows = document.getElementById('var-rows');
+    const div = document.createElement('div');
+    div.className = 'flex gap-12 mb-12 var-row fade-in';
+    div.innerHTML = `
+      <input type="text" name="var_key" placeholder="KEY" style="flex:1; font-family:var(--font-mono); font-size:.8rem;" />
+      <input type="text" name="var_value" placeholder="Value" style="flex:2; font-family:var(--font-mono); font-size:.8rem;" />
+      <button type="button" class="btn btn-secondary btn-sm" onclick="this.parentElement.remove()" style="padding:6px 10px;" aria-label="Remove row">×</button>
+    `;
+    rows.appendChild(div);
+  }
+
+  function fetchConfig() {
+    const appId = document.getElementById('app_id').value;
+    if (!appId) return;
+    
+    document.getElementById('placeholder-card').style.display = 'none';
+    const card = document.getElementById('current-config-card');
+    card.style.display = 'block';
+    
+    document.getElementById('config-loading').style.display = 'block';
+    document.getElementById('config-empty').style.display = 'none';
+    document.getElementById('config-error').style.display = 'none';
+    document.getElementById('config-table-wrap').style.display = 'none';
+    document.getElementById('config-raw-wrap').style.display = 'none';
+    document.getElementById('unset-form').style.display = 'none';
+    document.getElementById('set-config-card').style.display = 'none';
+    
+    fetch(`{% url 'ui:app-config-fetch' %}?app_id=${appId}`)
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById('config-loading').style.display = 'none';
+        
+        if (data.error) {
+          const errDiv = document.getElementById('config-error');
+          errDiv.textContent = data.error;
+          errDiv.style.display = 'flex';
+          return;
+        }
+        
+        // Show raw output
+        if (data.raw_output) {
+          document.getElementById('config-raw').textContent = data.raw_output;
+          document.getElementById('config-raw-wrap').style.display = 'block';
+        }
+        
+        const config = data.config;
+        const keys = Object.keys(config).sort();
+        
+        if (keys.length === 0) {
+          document.getElementById('config-empty').style.display = 'block';
+        } else {
+          const tbody = document.getElementById('config-tbody');
+          tbody.innerHTML = '';
+          keys.forEach(key => {
+            const tr = document.createElement('tr');
+            
+            const tdCheck = document.createElement('td');
+            tdCheck.style.textAlign = 'center';
+            const check = document.createElement('input');
+            check.type = 'checkbox';
+            check.className = 'var-checkbox';
+            check.value = key;
+            check.onchange = updateUnsetForm;
+            check.setAttribute('aria-label', 'Select ' + key);
+            tdCheck.appendChild(check);
+            
+            const tdKey = document.createElement('td');
+            tdKey.className = 'mono';
+            tdKey.style.fontWeight = 'bold';
+            tdKey.textContent = key;
+            
+            const tdVal = document.createElement('td');
+            tdVal.className = 'mono text-muted';
+            tdVal.style.wordBreak = 'break-all';
+            tdVal.textContent = config[key];
+            
+            // Allow clicking row to populate 'Set' form
+            tr.style.cursor = 'pointer';
+            tr.onclick = (e) => {
+              if (e.target.type === 'checkbox') return;
+              populateSetForm(key, config[key]);
+            };
+            
+            tr.appendChild(tdCheck);
+            tr.appendChild(tdKey);
+            tr.appendChild(tdVal);
+            tbody.appendChild(tr);
+          });
+          
+          document.getElementById('config-table-wrap').style.display = 'block';
+          document.getElementById('select-all').checked = false;
+        }
+        
+        // Show set config card
+        document.getElementById('set-config-card').style.display = 'block';
+      })
+      .catch(err => {
+        document.getElementById('config-loading').style.display = 'none';
+        const errDiv = document.getElementById('config-error');
+        errDiv.textContent = 'Failed to fetch configuration. Check console for details.';
+        errDiv.style.display = 'flex';
+        console.error(err);
+      });
+  }
+  
+  function populateSetForm(key, value) {
+    const rows = document.getElementById('var-rows');
+    // Check if key already exists in the form
+    const existingInputs = rows.querySelectorAll('input[name="var_key"]');
+    for (let i = 0; i < existingInputs.length; i++) {
+      if (existingInputs[i].value === key) {
+        existingInputs[i].nextElementSibling.value = value;
+        existingInputs[i].nextElementSibling.focus();
+        return;
+      }
+    }
+    
+    // Check for empty row
+    for (let i = 0; i < existingInputs.length; i++) {
+      if (!existingInputs[i].value) {
+        existingInputs[i].value = key;
+        existingInputs[i].nextElementSibling.value = value;
+        existingInputs[i].nextElementSibling.focus();
+        return;
+      }
+    }
+    
+    // Add new row
+    addVarRow();
+    const newInputs = rows.querySelectorAll('input[name="var_key"]');
+    const lastInput = newInputs[newInputs.length - 1];
+    lastInput.value = key;
+    lastInput.nextElementSibling.value = value;
+    lastInput.nextElementSibling.focus();
+  }
+
+  function toggleSelectAll(source) {
+    const checkboxes = document.querySelectorAll('.var-checkbox');
+    checkboxes.forEach(cb => cb.checked = source.checked);
+    updateUnsetForm();
+  }
+  
+  function updateUnsetForm() {
+    const checkboxes = document.querySelectorAll('.var-checkbox:checked');
+    const unsetForm = document.getElementById('unset-form');
+    const unsetInput = document.getElementById('unset_keys_input');
+    
+    if (checkboxes.length > 0) {
+      const keys = Array.from(checkboxes).map(cb => cb.value);
+      unsetInput.value = keys.join(',');
+      unsetForm.style.display = 'flex';
+    } else {
+      unsetInput.value = '';
+      unsetForm.style.display = 'none';
+    }
+  }
+  
+  function confirmUnset() {
+    const keys = document.getElementById('unset_keys_input').value.split(',');
+    return confirm(`Are you sure you want to delete ${keys.length} variable(s)?\n\n${keys.join('\n')}`);
+  }
+</script>
+{% endblock %}
