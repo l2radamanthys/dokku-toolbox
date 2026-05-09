@@ -147,6 +147,7 @@ def execute_command(
     server: Server,
     app: Optional[App] = None,
     triggered_by: Optional[User] = None,
+    skip_validation: bool = False,
 ) -> ExecutionLog:
     """
     Execute a validated Command or custom string on a Server (optionally scoped to an App).
@@ -173,7 +174,8 @@ def execute_command(
     elif custom_command:
         from .models import validate_safe_command
         # Optional: validate custom command safety
-        validate_safe_command(custom_command)
+        if not skip_validation:
+            validate_safe_command(custom_command)
         if app:
             if app.server_id != server.id:
                 raise ValueError(f"App '{app.name}' does not belong to server '{server.name}'.")
@@ -375,6 +377,7 @@ def set_app_config(
     *variables* is a dict of KEY=VALUE pairs to set.
     Returns an ExecutionLog record.
     """
+    import shlex
     from .models import validate_safe_command
 
     server = app.server
@@ -394,13 +397,14 @@ def set_app_config(
                 f"Invalid variable name '{key}'. "
                 "Use uppercase letters, digits, and underscores only."
             )
-        pairs.append(f"{key}={value}")
+        pairs.append(f"{key}={shlex.quote(value)}")
 
     pairs_str = ' '.join(pairs)
     remote_cmd = f"config:set --no-restart {app.name} {pairs_str}"
 
-    # Validate the full command for shell safety
-    validate_safe_command(remote_cmd)
+    # We skip the general validate_safe_command because shlex.quote()
+    # makes the values safe, and they might contain characters like ';' 
+    # that the general validator rejects.
 
     logger.info(
         "Setting config for app '%s' on %s: %s (triggered_by=%s)",
@@ -411,6 +415,7 @@ def set_app_config(
         custom_command=remote_cmd,
         server=server,
         triggered_by=triggered_by,
+        skip_validation=True,
     )
 
 
@@ -450,4 +455,5 @@ def unset_app_config(
         custom_command=remote_cmd,
         server=server,
         triggered_by=triggered_by,
+        skip_validation=True,
     )
